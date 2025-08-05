@@ -748,7 +748,7 @@ class NevFile:
 
             # Remove the ROI comments from the list
             subsetInds = list(
-                set(list(range(0, len(charSetList) - 1))) - set(ROIPackets)
+                set(list(range(0, len(charSetList)))) - set(ROIPackets)
             )
 
             output["comments"] = {
