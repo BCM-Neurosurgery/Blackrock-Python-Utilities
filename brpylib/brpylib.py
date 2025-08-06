@@ -45,7 +45,7 @@ import numpy as np
 from .brMiscFxns import brmiscfxns_ver, openfilecheck
 
 # Version control set/check
-brpylib_ver = "2.0.3"
+brpylib_ver = "2.0.4"
 brmiscfxns_ver_req = "1.2.0"
 if brmiscfxns_ver.split(".") < brmiscfxns_ver_req.split("."):
     raise Exception(
