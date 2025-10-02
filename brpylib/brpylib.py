@@ -968,6 +968,11 @@ class NevFile:
                 "ChangeType": list(ts[configPackets]),
             }
 
+        try:
+            output["recording_events"] = self.get_recording_events_raw()
+        except Exception:
+            output["recording_events"] = None
+
         return output
 
     def processroicomments(
@@ -1016,6 +1021,72 @@ class NevFile:
         self.datafile.close()
         print("\n" + name.split("/")[-1] + " closed")
 
+    def get_recording_events_raw(self):
+        """
+        Return a NumPy structured array of Recording Events (PacketID 0xFFF9)
+        with fields:
+            - 'TimeStamp' : uint64 (BREVENTS) or uint32 (NEURALEV)
+            - 'Reason'    : uint16 (0=Start, 1=Stop, 2=Pause, 3=Resume)
+
+        Notes
+        -----
+        - No UTC conversion; this matches the MATLAB style where you get raw ticks + reason.
+        - Sorted by TimeStamp ascending.
+        """
+        import os, struct
+        import numpy as np
+
+        bh = self.basic_header
+        bytes_in_header = int(bh["BytesInHeader"])
+        bytes_in_data_packets = int(bh["BytesInDataPackets"])
+
+        # Figure timestamp width: BREVENTS -> 8 bytes, otherwise 4
+        file_type = str(bh.get("FileTypeID", "NEURALEV")).upper()
+        ts_bytes = 8 if file_type == "BREVENTS" else 4
+
+        # Read entire data section
+        f = self.datafile
+        f.seek(0, os.SEEK_END)
+        file_size = f.tell()
+        data_size = file_size - bytes_in_header
+        if data_size <= 0 or bytes_in_data_packets <= 0:
+            dt = np.dtype([("TimeStamp", "<u8" if ts_bytes == 8 else "<u4"),
+                        ("Reason",    "<u2")])
+            return np.empty(0, dtype=dt)
+
+        n_packets = data_size // bytes_in_data_packets
+        f.seek(bytes_in_header, os.SEEK_SET)
+        buf = f.read(n_packets * bytes_in_data_packets)
+        mv = memoryview(buf)
+
+        ts_fmt = "<Q" if ts_bytes == 8 else "<I"
+        pid_off = ts_bytes
+        pid_fmt = "<H"
+        reason_off = ts_bytes + 2
+        reason_fmt = "<H"
+
+        # Collect matches
+        ts_list = []
+        rs_list = []
+        for i in range(n_packets):
+            off = i * bytes_in_data_packets
+            packet_id = struct.unpack_from(pid_fmt, mv, off + pid_off)[0]
+            if packet_id != 0xFFF9:
+                continue
+            ticks  = struct.unpack_from(ts_fmt, mv, off)[0]
+            reason = struct.unpack_from(reason_fmt, mv, off + reason_off)[0]
+            ts_list.append(ticks)
+            rs_list.append(reason)
+
+        # Build structured array (sorted by TimeStamp)
+        ts_arr = np.array(ts_list, dtype="<u8" if ts_bytes == 8 else "<u4")
+        rs_arr = np.array(rs_list, dtype="<u2")
+        order  = np.argsort(ts_arr) if ts_arr.size else slice(None)
+        dt = np.dtype([("TimeStamp", ts_arr.dtype.str), ("Reason", rs_arr.dtype.str)])
+        out = np.empty(ts_arr.size, dtype=dt)
+        out["TimeStamp"] = ts_arr[order]
+        out["Reason"] = rs_arr[order]
+        return out
 
 class NsxFile:
     """
